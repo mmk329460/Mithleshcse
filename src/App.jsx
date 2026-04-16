@@ -29,28 +29,34 @@ import {
   ChevronUp,
   FolderOpen
 } from 'lucide-react';
+import { db, storage } from './firebase';
+import { 
+  collection, 
+  addDoc, 
+  onSnapshot, 
+  deleteDoc, 
+  doc, 
+  getDoc, 
+  setDoc,
+  query,
+  orderBy
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+
 
 const App = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeSection, setActiveSection] = useState('home');
-  const [documents, setDocuments] = useState(() => {
-    const saved = localStorage.getItem('portfolioDocs');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [certificates, setCertificates] = useState(() => {
-    const saved = localStorage.getItem('portfolioCerts');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [documents, setDocuments] = useState([]);
+  const [certificates, setCertificates] = useState([]);
   const [isDocsExpanded, setIsDocsExpanded] = useState(false);
   const [isCertsExpanded, setIsCertsExpanded] = useState(false);
-  const [resume, setResume] = useState(() => {
-    const saved = localStorage.getItem('portfolioResume');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [userPin, setUserPin] = useState(() => localStorage.getItem('portfolioPin') || "");
+  const [resume, setResume] = useState(null);
+  const [userPin, setUserPin] = useState("");
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
   // NOTE: LocalStorage is device-specific. To see documents on both Laptop and Phone, 
   // you must use a Backend Database like Supabase or Firebase.
@@ -68,17 +74,42 @@ const App = () => {
     restDelta: 0.001
   });
 
+  // Fetch Master PIN and Documents from Firebase
   useEffect(() => {
-    localStorage.setItem('portfolioDocs', JSON.stringify(documents));
-  }, [documents]);
+    // 1. Fetch PIN
+    const fetchPin = async () => {
+      const pinDoc = await getDoc(doc(db, "config", "masterPin"));
+      if (pinDoc.exists()) {
+        setUserPin(pinDoc.data().pin);
+      }
+    };
+    fetchPin();
 
-  useEffect(() => {
-    localStorage.setItem('portfolioCerts', JSON.stringify(certificates));
-  }, [certificates]);
+    // 2. Real-time sync for Documents
+    const qDocs = query(collection(db, "documents"), orderBy("id", "desc"));
+    const unsubDocs = onSnapshot(qDocs, (snapshot) => {
+      setDocuments(snapshot.docs.map(doc => ({ ...doc.data(), firestoreId: doc.id })));
+      setIsLoading(false);
+    });
 
-  useEffect(() => {
-    if (resume) localStorage.setItem('portfolioResume', JSON.stringify(resume));
-  }, [resume]);
+    // 3. Real-time sync for Certificates
+    const qCerts = query(collection(db, "certificates"), orderBy("id", "desc"));
+    const unsubCerts = onSnapshot(qCerts, (snapshot) => {
+      setCertificates(snapshot.docs.map(doc => ({ ...doc.data(), firestoreId: doc.id })));
+    });
+
+    // 4. Fetch Resume
+    const fetchResume = async () => {
+      const resumeDoc = await getDoc(doc(db, "config", "resume"));
+      if (resumeDoc.exists()) setResume(resumeDoc.data());
+    };
+    fetchResume();
+
+    return () => {
+      unsubDocs();
+      unsubCerts();
+    };
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -88,36 +119,45 @@ const App = () => {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  const handleFileUpload = (e, type) => {
+  const handleFileUpload = async (e, type) => {
     const file = e.target.files[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        alert("File size too large for local storage (Max 2MB).");
+      if (file.size > 5 * 1024 * 1024) { // Increased limit for cloud
+        alert("File size too large (Max 5MB).");
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
+      try {
+        const storageRef = ref(storage, `${type}s/${Date.now()}_${file.name}`);
+        const snapshot = await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(snapshot.ref);
+
         const fileData = {
           id: Date.now(),
           name: file.name,
           date: new Date().toLocaleDateString(),
-          url: reader.result,
+          url: downloadURL,
+          storagePath: snapshot.ref.fullPath,
           size: (file.size / 1024).toFixed(2) + ' KB'
         };
+
         if (type === 'doc') {
-          setDocuments([...documents, fileData]);
-          setIsUnlocked(false); // Auto-lock after adding
-          alert("Document added and secured successfully!");
+          await addDoc(collection(db, "documents"), fileData);
+          setIsUnlocked(false);
+          alert("Document uploaded and secured!");
+        } else if (type === 'cert') {
+          await addDoc(collection(db, "certificates"), fileData);
+          setIsUnlocked(false);
+          alert("Certificate uploaded and secured!");
+        } else if (type === 'resume') {
+          await setDoc(doc(db, "config", "resume"), fileData);
+          setResume(fileData);
+          alert("Resume updated!");
         }
-        else if (type === 'cert') {
-          setCertificates([...certificates, fileData]);
-          setIsUnlocked(false); // Auto-lock after adding
-          alert("Certificate added and secured successfully!");
-        }
-        else if (type === 'resume') setResume(fileData);
-      };
-      reader.readAsDataURL(file);
+      } catch (error) {
+        console.error("Error uploading:", error);
+        alert("Upload failed. Make sure Firebase is configured correctly.");
+      }
     }
   };
 
@@ -127,28 +167,43 @@ const App = () => {
       setShowPinModal(false);
       setPinInput("");
     } else {
-      alert("Incorrect PIN!");
+      alert("Incorrect master PIN!");
     }
   };
 
-  const handleSetPin = () => {
+  const handleSetPin = async () => {
     if (pinInput.length < 4) {
       alert("PIN must be at least 4 digits.");
       return;
     }
-    localStorage.setItem('portfolioPin', pinInput);
-    setUserPin(pinInput);
-    setIsUnlocked(true);
-    setShowPinModal(false);
-    setPinInput("");
-    alert("PIN set successfully!");
+    try {
+      await setDoc(doc(db, "config", "masterPin"), { pin: pinInput });
+      setUserPin(pinInput);
+      setIsUnlocked(true);
+      setShowPinModal(false);
+      setPinInput("");
+      alert("Master PIN set successfully for all users!");
+    } catch (error) {
+      alert("Failed to set PIN. Check Firebase permissions.");
+    }
   };
 
-  const handleDelete = (id, type) => {
-    if (type === 'doc') {
-      setDocuments(documents.filter(doc => doc.id !== id));
-    } else {
-      setCertificates(certificates.filter(cert => cert.id !== id));
+  const handleDelete = async (file, type) => {
+    if (!window.confirm("Are you sure you want to delete this file?")) return;
+    
+    try {
+      // 1. Delete from Storage
+      const storageRef = ref(storage, file.storagePath);
+      await deleteObject(storageRef);
+
+      // 2. Delete from Firestore
+      const collectionName = type === 'doc' ? "documents" : "certificates";
+      await deleteDoc(doc(db, collectionName, file.firestoreId));
+      
+      alert("Deleted successfully!");
+    } catch (error) {
+      console.error("Delete error:", error);
+      alert("Delete failed.");
     }
   };
 
@@ -782,7 +837,7 @@ const App = () => {
                                     <Download size={18} />
                                   </a>
                                   <button 
-                                    onClick={() => handleDelete(doc.id, 'doc')}
+                                    onClick={() => handleDelete(doc, 'doc')}
                                     className="p-3 glass-card hover:bg-red-500/20 hover:text-red-500 transition-all text-slate-400"
                                   >
                                     <Trash2 size={18} />
@@ -864,7 +919,7 @@ const App = () => {
                                     <Download size={18} />
                                   </a>
                                   <button 
-                                    onClick={() => handleDelete(cert.id, 'cert')}
+                                    onClick={() => handleDelete(cert, 'cert')}
                                     className="p-3 glass-card hover:bg-red-500/20 hover:text-red-500 transition-all text-slate-400"
                                   >
                                     <Trash2 size={18} />
@@ -961,8 +1016,8 @@ const App = () => {
               
               <p className="text-slate-400 mb-8 text-sm leading-relaxed">
                 {userPin 
-                  ? "Enter your secret access code to enable downloads and deletions." 
-                  : "Create a 4-digit code to protect your personal files. This will be stored locally on this device."}
+                  ? "Enter the global master PIN to enable downloads and deletions." 
+                  : "Create a 4-digit master PIN to protect your personal files. This will be shared across all devices."}
               </p>
 
               <div className="space-y-6">
