@@ -51,6 +51,10 @@ const App = () => {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
+
+  // NOTE: LocalStorage is device-specific. To see documents on both Laptop and Phone, 
+  // you must use a Backend Database like Supabase or Firebase.
+  // Contact me if you want help setting up a cloud database for real-time sync!
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isImageHovered, setIsImageHovered] = useState(false);
 
@@ -101,8 +105,16 @@ const App = () => {
           url: reader.result,
           size: (file.size / 1024).toFixed(2) + ' KB'
         };
-        if (type === 'doc') setDocuments([...documents, fileData]);
-        else if (type === 'cert') setCertificates([...certificates, fileData]);
+        if (type === 'doc') {
+          setDocuments([...documents, fileData]);
+          setIsUnlocked(false); // Auto-lock after adding
+          alert("Document added and secured successfully!");
+        }
+        else if (type === 'cert') {
+          setCertificates([...certificates, fileData]);
+          setIsUnlocked(false); // Auto-lock after adding
+          alert("Certificate added and secured successfully!");
+        }
         else if (type === 'resume') setResume(fileData);
       };
       reader.readAsDataURL(file);
