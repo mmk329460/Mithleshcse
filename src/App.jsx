@@ -538,7 +538,7 @@ const App = () => {
         <section id="skills" className="py-40 px-6 relative">
           <div className="max-w-7xl mx-auto">
             <div className="text-center mb-24">
-              <h2 className="text-5xl md:text-7xl font-black mb-6">Tech Mastery</h2>
+              <h2 className="text-5xl md:text-7xl font-black mb-6">My Skills</h2>
               <p className="text-slate-400 text-xl font-light">Tools I use to bring ideas into reality.</p>
             </div>
             
