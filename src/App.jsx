@@ -101,30 +101,34 @@ const App = () => {
     if (isConfigured) {
       setDbStatus('checking');
       
-      // Try to get Pin quietly
-      getDoc(doc(db, "config", "masterPin")).then(s => {
-        setDbStatus('connected');
-        if (s.exists()) setUserPin(s.data().pin);
-      }).catch(() => setDbStatus('error'));
-
-      // Background Listeners
+      // Listeners are the best way to detect real connection
       onSnapshot(collection(db, "documents"), (snap) => {
+        setDbStatus('connected'); // If we get a snap, we are live!
         const d = snap.docs.map(x => ({ ...x.data(), firestoreId: x.id }));
         if (d.length > 0) {
           d.sort((a,b) => b.id - a.id);
           setDocuments(d);
           localStorage.setItem('portfolio_docs', JSON.stringify(d));
         }
-      }, (err) => console.log("Cloud documents unreachable", err.code));
+      }, (err) => {
+        console.warn("Docs block:", err.code);
+        setDbStatus('error');
+      });
 
       onSnapshot(collection(db, "certificates"), (snap) => {
+        setDbStatus('connected');
         const c = snap.docs.map(x => ({ ...x.data(), firestoreId: x.id }));
         if (c.length > 0) {
           c.sort((a,b) => b.id - a.id);
           setCertificates(c);
           localStorage.setItem('portfolio_certs', JSON.stringify(c));
         }
-      }, (err) => console.log("Cloud certificates unreachable", err.code));
+      }, (err) => setDbStatus('error'));
+
+      // Also try to get the PIN but don't let it block us
+      getDoc(doc(db, "config", "masterPin")).then(s => {
+        if (s.exists()) setUserPin(s.data().pin);
+      }).catch(() => {});
     }
   }, []);
 
