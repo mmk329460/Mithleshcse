@@ -124,19 +124,17 @@ const App = () => {
 
       // Listeners are the best way to detect real connection
       onSnapshot(collection(db, "documents"), (snap) => {
-        const isInitial = dbStatus === 'checking';
         setDbStatus('connected'); 
         const d = snap.docs.map(x => ({ ...x.data(), firestoreId: x.id }));
         if (d.length > 0) {
           d.sort((a,b) => b.id - a.id);
           setDocuments(d);
           localStorage.setItem('portfolio_docs', JSON.stringify(d));
-        } else if (isInitial) {
-           // If cloud is empty but we just connected, sync our local stuff UP
-           const localDocs = JSON.parse(localStorage.getItem('portfolio_docs') || "[]");
-           const localCerts = JSON.parse(localStorage.getItem('portfolio_certs') || "[]");
-           syncPendingData(localDocs, localCerts);
         }
+        // Always try to sync local-only items when connection is live
+        const localDocs = JSON.parse(localStorage.getItem('portfolio_docs') || "[]");
+        const localCerts = JSON.parse(localStorage.getItem('portfolio_certs') || "[]");
+        syncPendingData(localDocs, localCerts);
       }, (err) => setDbStatus('error'));
 
       onSnapshot(collection(db, "certificates"), (snap) => {
@@ -962,7 +960,14 @@ const App = () => {
                                 <FileText className="text-blue-400 w-6 h-6" />
                               </div>
                               <div>
-                                <p className="font-bold mb-1">{doc.name}</p>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <p className="font-bold">{doc.name}</p>
+                                  {doc.firestoreId ? (
+                                    <Cloud className="w-3 h-3 text-blue-400" title="Synced to Cloud" />
+                                  ) : (
+                                    <Save className="w-3 h-3 text-slate-500 animate-pulse" title="Syncing..." />
+                                  )}
+                                </div>
                                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{doc.size} • {doc.date}</p>
                               </div>
                             </div>
@@ -1044,7 +1049,14 @@ const App = () => {
                                 <Award className="text-purple-400 w-6 h-6" />
                               </div>
                               <div>
-                                <p className="font-bold mb-1">{cert.name}</p>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <p className="font-bold">{cert.name}</p>
+                                  {cert.firestoreId ? (
+                                    <Cloud className="w-3 h-3 text-purple-400" title="Synced to Cloud" />
+                                  ) : (
+                                    <Save className="w-3 h-3 text-slate-500 animate-pulse" title="Syncing..." />
+                                  )}
+                                </div>
                                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{cert.size} • {cert.date}</p>
                               </div>
                             </div>
