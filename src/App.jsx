@@ -41,7 +41,8 @@ import {
   query,
   orderBy
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { getAuth, signInAnonymously } from "firebase/auth";
 
 
 const App = () => {
@@ -57,8 +58,18 @@ const App = () => {
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [dbStatus, setDbStatus] = useState('checking'); // 'checking', 'connected', 'local', 'error'
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [isLocalMode, setIsLocalMode] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
 
-  // NOTE: LocalStorage is device-specific. To see documents on both Laptop and Phone, 
+  // Check if session was already unlocked
+  useEffect(() => {
+    const sessionAuth = sessionStorage.getItem('vault_unlocked');
+    if (sessionAuth === 'true') setIsUnlocked(true);
+  }, []);
+
+  // NOTE: LocalStorage is device-specific.
   // you must use a Backend Database like Supabase or Firebase.
   // Contact me if you want help setting up a cloud database for real-time sync!
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -74,41 +85,47 @@ const App = () => {
     restDelta: 0.001
   });
 
-  // Fetch Master PIN and Documents from Firebase
+  // Final Resilient Hybrid Sync
   useEffect(() => {
-    // 1. Fetch PIN
-    const fetchPin = async () => {
-      const pinDoc = await getDoc(doc(db, "config", "masterPin"));
-      if (pinDoc.exists()) {
-        setUserPin(pinDoc.data().pin);
-      }
-    };
-    fetchPin();
+    // 1. Load Everything Immediately from Local (No Wait)
+    try {
+      setDocuments(JSON.parse(localStorage.getItem('portfolio_docs') || "[]"));
+      setCertificates(JSON.parse(localStorage.getItem('portfolio_certs') || "[]"));
+      setResume(JSON.parse(localStorage.getItem('portfolio_resume') || "null"));
+      setUserPin(localStorage.getItem('portfolio_pin') || "");
+    } catch (e) { console.error("Local data load failed"); }
+    setIsLoading(false);
 
-    // 2. Real-time sync for Documents
-    const qDocs = query(collection(db, "documents"), orderBy("id", "desc"));
-    const unsubDocs = onSnapshot(qDocs, (snapshot) => {
-      setDocuments(snapshot.docs.map(doc => ({ ...doc.data(), firestoreId: doc.id })));
-      setIsLoading(false);
-    });
+    // 2. Background Cloud Sync (Silent)
+    const isConfigured = db.app.options.apiKey && db.app.options.apiKey !== "YOUR_API_KEY";
+    if (isConfigured) {
+      setDbStatus('checking');
+      
+      // Try to get Pin quietly
+      getDoc(doc(db, "config", "masterPin")).then(s => {
+        setDbStatus('connected');
+        if (s.exists()) setUserPin(s.data().pin);
+      }).catch(() => setDbStatus('error'));
 
-    // 3. Real-time sync for Certificates
-    const qCerts = query(collection(db, "certificates"), orderBy("id", "desc"));
-    const unsubCerts = onSnapshot(qCerts, (snapshot) => {
-      setCertificates(snapshot.docs.map(doc => ({ ...doc.data(), firestoreId: doc.id })));
-    });
+      // Background Listeners
+      onSnapshot(collection(db, "documents"), (snap) => {
+        const d = snap.docs.map(x => ({ ...x.data(), firestoreId: x.id }));
+        if (d.length > 0) {
+          d.sort((a,b) => b.id - a.id);
+          setDocuments(d);
+          localStorage.setItem('portfolio_docs', JSON.stringify(d));
+        }
+      }, (err) => console.log("Cloud documents unreachable", err.code));
 
-    // 4. Fetch Resume
-    const fetchResume = async () => {
-      const resumeDoc = await getDoc(doc(db, "config", "resume"));
-      if (resumeDoc.exists()) setResume(resumeDoc.data());
-    };
-    fetchResume();
-
-    return () => {
-      unsubDocs();
-      unsubCerts();
-    };
+      onSnapshot(collection(db, "certificates"), (snap) => {
+        const c = snap.docs.map(x => ({ ...x.data(), firestoreId: x.id }));
+        if (c.length > 0) {
+          c.sort((a,b) => b.id - a.id);
+          setCertificates(c);
+          localStorage.setItem('portfolio_certs', JSON.stringify(c));
+        }
+      }, (err) => console.log("Cloud certificates unreachable", err.code));
+    }
   }, []);
 
   useEffect(() => {
@@ -121,49 +138,66 @@ const App = () => {
 
   const handleFileUpload = async (e, type) => {
     const file = e.target.files[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) { // Increased limit for cloud
-        alert("File size too large (Max 5MB).");
-        return;
+    if (!file) return;
+
+    if (file.size > 1024 * 1024) {
+      alert("File limited to 1MB (Free Mode).");
+      return;
+    }
+
+    setUploadProgress(`Processing ${type}...`);
+    
+    try {
+      const reader = new FileReader();
+      const fileBase64 = await new Promise((res, rej) => {
+        reader.onload = (e) => res(e.target.result);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+
+      const fileData = {
+        id: Date.now(),
+        name: file.name,
+        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        url: fileBase64,
+        size: (file.size / 1024).toFixed(2) + ' KB',
+        timestamp: new Date().toISOString()
+      };
+
+      // 1. UPDATE UI IMMEDIATELY (Local)
+      if (type === 'doc') {
+        const newDocs = [fileData, ...documents];
+        setDocuments(newDocs);
+        localStorage.setItem('portfolio_docs', JSON.stringify(newDocs));
+      } else if (type === 'cert') {
+        const newCerts = [fileData, ...certificates];
+        setCertificates(newCerts);
+        localStorage.setItem('portfolio_certs', JSON.stringify(newCerts));
+      } else if (type === 'resume') {
+        setResume(fileData);
+        localStorage.setItem('portfolio_resume', JSON.stringify(fileData));
       }
 
-      try {
-        const storageRef = ref(storage, `${type}s/${Date.now()}_${file.name}`);
-        const snapshot = await uploadBytes(storageRef, file);
-        const downloadURL = await getDownloadURL(snapshot.ref);
+      setUploadProgress(null);
+      alert(`${type.toUpperCase()} saved locally! Attempting to sync with Cloud... ☁️`);
 
-        const fileData = {
-          id: Date.now(),
-          name: file.name,
-          date: new Date().toLocaleDateString(),
-          url: downloadURL,
-          storagePath: snapshot.ref.fullPath,
-          size: (file.size / 1024).toFixed(2) + ' KB'
-        };
-
-        if (type === 'doc') {
-          await addDoc(collection(db, "documents"), fileData);
-          setIsUnlocked(false);
-          alert("Document uploaded and secured!");
-        } else if (type === 'cert') {
-          await addDoc(collection(db, "certificates"), fileData);
-          setIsUnlocked(false);
-          alert("Certificate uploaded and secured!");
-        } else if (type === 'resume') {
-          await setDoc(doc(db, "config", "resume"), fileData);
-          setResume(fileData);
-          alert("Resume updated!");
-        }
-      } catch (error) {
-        console.error("Error uploading:", error);
-        alert("Upload failed. Make sure Firebase is configured correctly.");
+      // 2. SYNC WITH CLOUD IN BACKGROUND
+      const isConfigured = db.app.options.apiKey && db.app.options.apiKey !== "YOUR_API_KEY";
+      if (isConfigured) {
+        if (type === 'doc') addDoc(collection(db, "documents"), fileData);
+        else if (type === 'cert') addDoc(collection(db, "certificates"), fileData);
+        else if (type === 'resume') setDoc(doc(db, "config", "resume"), fileData);
       }
+    } catch (err) {
+      console.error("Hybrid upload error:", err);
+      setUploadProgress(null);
     }
   };
 
   const handleVerifyPin = () => {
     if (pinInput === userPin) {
       setIsUnlocked(true);
+      sessionStorage.setItem('vault_unlocked', 'true');
       setShowPinModal(false);
       setPinInput("");
     } else {
@@ -177,14 +211,20 @@ const App = () => {
       return;
     }
     try {
-      await setDoc(doc(db, "config", "masterPin"), { pin: pinInput });
-      setUserPin(pinInput);
+      if (isLocalMode) {
+        localStorage.setItem('portfolio_pin', pinInput);
+        setUserPin(pinInput);
+      } else {
+        await setDoc(doc(db, "config", "masterPin"), { pin: pinInput });
+        setUserPin(pinInput);
+      }
       setIsUnlocked(true);
+      sessionStorage.setItem('vault_unlocked', 'true');
       setShowPinModal(false);
       setPinInput("");
-      alert("Master PIN set successfully for all users!");
+      alert("Master PIN saved permanently in database!");
     } catch (error) {
-      alert("Failed to set PIN. Check Firebase permissions.");
+      alert("Failed to set PIN.");
     }
   };
 
@@ -192,13 +232,22 @@ const App = () => {
     if (!window.confirm("Are you sure you want to delete this file?")) return;
     
     try {
-      // 1. Delete from Storage
-      const storageRef = ref(storage, file.storagePath);
-      await deleteObject(storageRef);
-
-      // 2. Delete from Firestore
-      const collectionName = type === 'doc' ? "documents" : "certificates";
-      await deleteDoc(doc(db, collectionName, file.firestoreId));
+      if (isLocalMode) {
+        // LOCAL DELETE
+        if (type === 'doc') {
+          const newDocs = documents.filter(d => d.id !== file.id);
+          setDocuments(newDocs);
+          localStorage.setItem('portfolio_docs', JSON.stringify(newDocs));
+        } else if (type === 'cert') {
+          const newCerts = certificates.filter(c => c.id !== file.id);
+          setCertificates(newCerts);
+          localStorage.setItem('portfolio_certs', JSON.stringify(newCerts));
+        }
+      } else {
+        // CLOUD DELETE
+        const collectionName = type === 'doc' ? "documents" : "certificates";
+        await deleteDoc(doc(db, collectionName, file.firestoreId));
+      }
       
       alert("Deleted successfully!");
     } catch (error) {
@@ -284,6 +333,16 @@ const App = () => {
           >
             <Sparkles className="text-blue-400 w-8 h-8" />
             <span className="tracking-tighter">PORTFOLIO</span>
+            <div className="flex items-center gap-1 ml-4 py-1 px-3 rounded-full bg-white/5 border border-white/10">
+              <div className={`w-2 h-2 rounded-full ${
+                dbStatus === 'connected' ? 'bg-green-500 animate-pulse' : 
+                dbStatus === 'checking' ? 'bg-yellow-500 animate-pulse' : 
+                dbStatus === 'local' ? 'bg-blue-500' : 'bg-red-500'
+              }`} />
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                {dbStatus}
+              </span>
+            </div>
           </motion.div>
 
           {/* Desktop Nav */}
@@ -364,6 +423,26 @@ const App = () => {
           </AnimatePresence>
         </div>
       </nav>
+
+      {/* Upload Progress Overlay */}
+      <AnimatePresence>
+        {uploadProgress && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6"
+          >
+            <div className="glass-card p-12 max-w-md w-full text-center border-t-4 border-blue-500">
+                <>
+                  <div className="w-20 h-20 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto mb-8" />
+                  <h3 className="text-2xl font-black mb-4 animate-pulse uppercase tracking-tighter italic text-blue-400">Processing...</h3>
+                  <p className="text-white text-lg font-medium mb-6">{uploadProgress}</p>
+                </>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className="relative z-10">
         {/* Hero Section */}
@@ -740,11 +819,40 @@ const App = () => {
                className="flex flex-col md:flex-row justify-between items-end mb-24 gap-12"
             >
               <div className="max-w-2xl">
-                <h2 className="text-5xl md:text-7xl font-black mb-8 leading-tight line-clamp-2">Credentials Center</h2>
-                <div className="flex items-center gap-4 mb-8">
-                  <div className={`px-4 py-2 rounded-full glass-card flex items-center gap-3 ${isUnlocked ? 'text-green-400 border-green-500/20' : 'text-red-400 border-red-500/20'}`}>
-                    {isUnlocked ? <Unlock size={18} /> : <Lock size={18} />}
-                    <span className="text-sm font-bold uppercase tracking-widest">{isUnlocked ? 'Vault Unlocked' : 'Vault Locked'}</span>
+                <h2 className="text-5xl md:text-7xl font-black mb-6 leading-tight">Credentials Center</h2>
+                
+                <div className="flex flex-wrap items-center gap-4 mb-8">
+                  {/* DB Connection Status */}
+                  <div className={`px-4 py-2 rounded-full glass-card flex items-center gap-2 border-white/5`}>
+                    <div className={`w-2 h-2 rounded-full ${
+                      dbStatus === 'connected' ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 
+                      dbStatus === 'error' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 
+                      'bg-yellow-500 animate-pulse'
+                    }`} />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      DB: {dbStatus === 'connected' ? 'Database Living' : dbStatus === 'local' ? 'Local Vault (Keys Empty)' : 'Offline'}
+                    </span>
+                    {!isLocalMode && (
+                      <button 
+                        onClick={async () => {
+                          try {
+                            const testRef = doc(db, "config", "test");
+                            await setDoc(testRef, { lastCheck: new Date().toISOString() });
+                            alert("✅ Connection Success! Database is receiving data.");
+                          } catch (err) {
+                            alert(`❌ Connection Denied! Check your Firestore Rules (Rules tab should be if true;). Error: ${err.message}`);
+                          }
+                        }}
+                        className="ml-2 px-2 py-0.5 bg-blue-500/10 hover:bg-blue-500/30 rounded text-[9px] font-black text-blue-400 transition-all border border-blue-500/20"
+                      >
+                        Check Status
+                      </button>
+                    )}
+                  </div>
+
+                  <div className={`px-4 py-2 rounded-full glass-card flex items-center gap-3 ${isUnlocked ? 'text-green-400 border-green-500/10' : 'text-red-400/80 border-red-500/10'}`}>
+                    {isUnlocked ? <Unlock size={14} /> : <Lock size={14} />}
+                    <span className="text-[10px] font-black uppercase tracking-widest">{isUnlocked ? 'Vault Unlocked' : 'Vault Locked'}</span>
                   </div>
                   <button 
                     onClick={() => setShowPinModal(true)}
@@ -1088,6 +1196,23 @@ const App = () => {
            </div>
         </div>
       </footer>
+      {/* Debug Diagnostic Footer */}
+      <div className="fixed bottom-4 right-4 z-[50] flex flex-col gap-2">
+        <div className={`p-4 glass-card border-l-4 ${dbStatus === 'connected' ? 'border-green-500' : 'border-red-500'} min-w-[200px] shadow-2xl backdrop-blur-3xl`}>
+          <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Database Signal</p>
+          <div className="flex items-center gap-2">
+            <div className={`w-3 h-3 rounded-full ${dbStatus === 'connected' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-xs font-bold uppercase text-white">{dbStatus}</span>
+          </div>
+          {dbStatus === 'error' && (
+             <div className="mt-2 p-2 bg-red-500/20 rounded border border-red-500/50">
+               <p className="text-[11px] text-red-100 font-bold leading-tight">ERROR DETECTED</p>
+               <p className="text-[10px] text-red-300 mt-1 leading-tight">{uploadError || 'See browser console'}</p>
+             </div>
+          )}
+          <p className="text-[8px] text-slate-400 mt-2 truncate font-mono">ID: {db.app.options.projectId}</p>
+        </div>
+      </div>
     </div>
   );
 };
