@@ -848,34 +848,6 @@ const App = () => {
                 <h2 className="text-5xl md:text-7xl font-black mb-6 leading-tight">Credentials Center</h2>
                 
                 <div className="flex flex-wrap items-center gap-4 mb-8">
-                  {/* DB Connection Status */}
-                  <div className={`px-4 py-2 rounded-full glass-card flex items-center gap-2 border-white/5`}>
-                    <div className={`w-2 h-2 rounded-full ${
-                      dbStatus === 'connected' ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 
-                      dbStatus === 'error' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 
-                      'bg-yellow-500 animate-pulse'
-                    }`} />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                      DB: {dbStatus === 'connected' ? 'Database Living' : dbStatus === 'local' ? 'Local Vault (Keys Empty)' : 'Offline'}
-                    </span>
-                    {!isLocalMode && (
-                      <button 
-                        onClick={async () => {
-                          try {
-                            const testRef = doc(db, "config", "test");
-                            await setDoc(testRef, { lastCheck: new Date().toISOString() });
-                            alert("✅ Connection Success! Database is receiving data.");
-                          } catch (err) {
-                            alert(`❌ Connection Denied! Check your Firestore Rules (Rules tab should be if true;). Error: ${err.message}`);
-                          }
-                        }}
-                        className="ml-2 px-2 py-0.5 bg-blue-500/10 hover:bg-blue-500/30 rounded text-[9px] font-black text-blue-400 transition-all border border-blue-500/20"
-                      >
-                        Check Status
-                      </button>
-                    )}
-                  </div>
-
                   <div className={`px-4 py-2 rounded-full glass-card flex items-center gap-3 ${isUnlocked ? 'text-green-400 border-green-500/10' : 'text-red-400/80 border-red-500/10'}`}>
                     {isUnlocked ? <Unlock size={14} /> : <Lock size={14} />}
                     <span className="text-[10px] font-black uppercase tracking-widest">{isUnlocked ? 'Vault Unlocked' : 'Vault Locked'}</span>
@@ -1236,23 +1208,7 @@ const App = () => {
            </div>
         </div>
       </footer>
-      {/* Debug Diagnostic Footer */}
-      <div className="fixed bottom-4 right-4 z-[50] flex flex-col gap-2">
-        <div className={`p-4 glass-card border-l-4 ${dbStatus === 'connected' ? 'border-green-500' : 'border-red-500'} min-w-[200px] shadow-2xl backdrop-blur-3xl`}>
-          <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Database Signal</p>
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${dbStatus === 'connected' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-            <span className="text-xs font-bold uppercase text-white">{dbStatus}</span>
-          </div>
-          {dbStatus === 'error' && (
-             <div className="mt-2 p-2 bg-red-500/20 rounded border border-red-500/50">
-               <p className="text-[11px] text-red-100 font-bold leading-tight">ERROR DETECTED</p>
-               <p className="text-[10px] text-red-300 mt-1 leading-tight">{uploadError || 'See browser console'}</p>
-             </div>
-          )}
-          <p className="text-[8px] text-slate-400 mt-2 truncate font-mono">ID: {db.app.options.projectId}</p>
-        </div>
-      </div>
+      {/* Database Signal Hidden */}
     </div>
   );
 };
