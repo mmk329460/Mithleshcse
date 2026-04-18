@@ -101,19 +101,43 @@ const App = () => {
     if (isConfigured) {
       setDbStatus('checking');
       
+      // Smart Syncing Loop
+      const syncPendingData = async (docs, certs) => {
+        console.log("Sync Manager: Checking for unsynced files...");
+        try {
+          // Sync Documents
+          for (const d of docs) {
+            if (!d.firestoreId) {
+              console.log("Syncing doc:", d.name);
+              await addDoc(collection(db, "documents"), { ...d, firestoreId: null });
+            }
+          }
+          // Sync Certificates
+          for (const c of certs) {
+            if (!c.firestoreId) {
+              console.log("Syncing cert:", c.name);
+              await addDoc(collection(db, "certificates"), { ...c, firestoreId: null });
+            }
+          }
+        } catch (e) { console.error("Sync loop error:", e); }
+      };
+
       // Listeners are the best way to detect real connection
       onSnapshot(collection(db, "documents"), (snap) => {
-        setDbStatus('connected'); // If we get a snap, we are live!
+        const isInitial = dbStatus === 'checking';
+        setDbStatus('connected'); 
         const d = snap.docs.map(x => ({ ...x.data(), firestoreId: x.id }));
         if (d.length > 0) {
           d.sort((a,b) => b.id - a.id);
           setDocuments(d);
           localStorage.setItem('portfolio_docs', JSON.stringify(d));
+        } else if (isInitial) {
+           // If cloud is empty but we just connected, sync our local stuff UP
+           const localDocs = JSON.parse(localStorage.getItem('portfolio_docs') || "[]");
+           const localCerts = JSON.parse(localStorage.getItem('portfolio_certs') || "[]");
+           syncPendingData(localDocs, localCerts);
         }
-      }, (err) => {
-        console.warn("Docs block:", err.code);
-        setDbStatus('error');
-      });
+      }, (err) => setDbStatus('error'));
 
       onSnapshot(collection(db, "certificates"), (snap) => {
         setDbStatus('connected');
