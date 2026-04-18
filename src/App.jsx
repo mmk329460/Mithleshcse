@@ -1085,7 +1085,6 @@ const App = () => {
                     )}
                   </AnimatePresence>
                 </div>
-                </div>
               </div>
             </div>
           </div>
