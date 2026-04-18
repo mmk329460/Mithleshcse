@@ -1132,8 +1132,6 @@ const App = () => {
                </div>
              </div>
           </div>
-        </section>>
-          </div>
         </section>
       </main>
 
