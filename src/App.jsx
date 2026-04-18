@@ -1085,8 +1085,12 @@ const App = () => {
                     )}
                   </AnimatePresence>
                 </div>
+                </div>
               </div>
             </div>
+          </div>
+        </section>
+
         {/* Contact Section */}
         <section id="contact" className="py-20 lg:py-40 px-4 md:px-6">
           <div className="max-w-5xl mx-auto glass-card p-1 relative overflow-hidden bg-gradient-to-br from-blue-500/5 to-purple-500/5 rounded-[2rem] lg:rounded-[3.5rem]">
