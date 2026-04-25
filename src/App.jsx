@@ -508,7 +508,9 @@ const App = () => {
                 <button  onClick={() => {
                  document.getElementById("projects").scrollIntoView({ behavior: "smooth" });
                   }} className="btn-primary scale-110">Start a Project</button>
-                <button className="px-10 py-5 rounded-2xl glass-card font-bold hover:bg-white/5 transition-all flex items-center gap-2 border-white/5">
+                <button  onClick={() => {
+                 document.getElementById("skills").scrollIntoView({ behavior: "smooth" });
+                  }} className="px-10 py-5 rounded-2xl glass-card font-bold hover:bg-white/5 transition-all flex items-center gap-2 border-white/5">
                   My Work <ChevronRight className="w-5 h-5" />
                 </button>
               </div>
@@ -754,7 +756,7 @@ const App = () => {
           <div className="max-w-7xl mx-auto">
             <div className="flex flex-col md:flex-row justify-between items-end mb-24 gap-8">
               <div className="max-w-2xl">
-                <h6 className="text-blue-400 font-bold tracking-[0.3em] uppercase mb-6">Gallery</h6>
+                <h6 className="text-blue-400 font-bold tracking-[0.3em] uppercase mb-6">Projects</h6>
                 <h2 className="text-5xl md:text-7xl font-black mb-8 leading-tight">Personal & <br /><span className="text-gradient">Academic Works</span></h2>
                 <p className="text-slate-400 text-xl font-light">A curated selection of projects that define my technical evolution.</p>
               </div>
