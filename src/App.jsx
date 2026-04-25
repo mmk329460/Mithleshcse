@@ -505,7 +505,9 @@ const App = () => {
 
               
               <div className="flex flex-wrap gap-6">
-                <button className="btn-primary scale-110">Start a Project</button>
+                <button  onClick={() => {
+                 document.getElementById("projects").scrollIntoView({ behavior: "smooth" });
+                  }} className="btn-primary scale-110">Start a Project</button>
                 <button className="px-10 py-5 rounded-2xl glass-card font-bold hover:bg-white/5 transition-all flex items-center gap-2 border-white/5">
                   My Work <ChevronRight className="w-5 h-5" />
                 </button>
